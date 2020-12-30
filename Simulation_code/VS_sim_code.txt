@@ -1,0 +1,409 @@
+Imports System.Text
+Imports System.Convert
+Imports System.Math
+Imports System
+Imports System.IO
+Imports System.Threading
+
+Imports VISSIM_COMSERVERLib
+
+Module Module1
+    Dim vissim As Vissim
+    Dim net As Net
+    Dim simulation As Simulation
+    Dim vehicles As Vehicles
+    Dim vehicle As Vehicle
+    Dim links As Links
+    Dim link As Link
+    Dim evaluation As Evaluation
+    Dim simtime = 10800
+    Dim resolution = 5
+
+    'Initiating function flipcoin to generate binary output that depends on the probability as its input parameter
+    Function flipcoin(ByVal j As Integer) As Integer
+        If j = 0 Then
+            Return 1
+
+        ElseIf j = 100 Then
+            Return 0
+
+        Else
+            Dim i As Integer = CInt(Math.Floor((100 - 0 + 1) * Rnd())) + 0
+            If i <= j Then
+                Return 0
+            Else
+                Return 1
+            End If
+        End If
+
+    End Function
+
+    Sub Main()
+        'For loop for different random seeds
+        For randcount = 7 To 8
+            Dim randseed = randcount
+
+            'Make a reference to the directory
+
+            Dim directoryPath As String = "\\CEEfilesrv3\Hunter$\Data\DBTB\Abhilasha\Research\VISSIM Modelling\Summer 2018\Vissim Files\TRB 2018\Experiment2_unsat_delay_prevmodel2\Varying_sidestreet_vol_files"
+            Dim directory As New IO.DirectoryInfo(directoryPath)
+
+            'Get reference to each file in the directory
+            Dim fiArr As FileInfo() = directory.GetFiles("*.inp")
+            Dim fi As IO.FileInfo
+
+
+            For Each fi In fiArr
+
+                Dim runningFileName As String = fi.Name
+                Dim Arr() As String
+                Arr = runningFileName.Split(".")
+
+                Dim finArr() As String
+                finArr = Arr(0).Split("_")
+
+                'Initiating an array named as "vol" with volume inputs accessed by "Volume" on eastbound and westbound approaches for the second hour 
+                'Running a for loop to access all the likelihoods
+                Dim likelihood() As Integer = {0, 20, 40, 60, 80, 100}
+                For value As Integer = 0 To likelihood.Length - 1
+
+                    'Initializing a new instance of Vissim
+                    vissim = New Vissim
+
+                    Dim runningFilePath As String = fi.FullName
+                    'loading Vissim network model ".inp" file and ".ini" file - DOS platform
+                    'vissim.LoadNet("C:\Users\asaroj3\Desktop\GRA\Spring 2016\Research\Vissim\Files\DBTB_network_5thfeb2016.inp")
+                    'vissim.LoadLayout("C:\Users\asaroj3\Desktop\GRA\Spring 2016\Research\Vissim\Files\DBTB_network_5thfeb2016.ini")
+
+                    vissim.LoadNet(runningFilePath)
+                    Dim runningFileINI As String = System.IO.Path.Combine(Arr(0), ".ini")
+                    vissim.LoadLayout(runningFileINI)
+
+                    'minimizing the vissim model to make it run faster
+                    vissim.ShowMinimized()
+
+                    'activating evaluation tools in the file
+                    evaluation = vissim.Evaluation
+                    evaluation.AttValue("traveltime") = True
+                    evaluation.AttValue("delay") = True
+                    evaluation.AttValue("datacollection") = True
+
+                    'Assigining simulation properties
+                    simulation = vissim.Simulation
+                    simulation.Period = simtime
+                    simulation.Resolution = resolution
+                    simulation.RandomSeed = randseed
+
+                    'Initializing the intersection link as blocking box and the link zone where vehicles are assigned
+                    'with blocking or non-blocking type as decisionBox for Eastbound and Westbound approaches
+                    Dim decisionBoxEB = vissim.Net.Links.GetLinkByNumber(11)
+                    Dim blockingBoxEB = vissim.Net.Links.GetLinkByNumber(13)
+                    Dim decisionBoxWB = vissim.Net.Links.GetLinkByNumber(6)
+                    Dim blockingBoxWB = vissim.Net.Links.GetLinkByNumber(14)
+
+                    'Initializing the variables to get vehicles in the decison box and blocking box
+                    Dim decisionBoxVehiclesEB = decisionBoxEB.GetVehicles
+                    Dim blockingBoxVehiclesEB = blockingBoxEB.GetVehicles
+                    Dim decisionBoxVehiclesWB = decisionBoxWB.GetVehicles
+                    Dim blockingBoxVehiclesWB = blockingBoxWB.GetVehicles
+
+                    'Initializing the two flags to use them for logic test in the if commands for changing the volumes  
+                    'during second and thrid hour of Eastbound and Westbound 
+                    Dim flag As Boolean = False
+                    Dim flag2 As Boolean = False
+
+                    'For loop for timesteps 
+                    'Run the simulation as singlestep
+                    For j = 0 To (simtime - 1) * resolution
+                        simulation.RunSingleStep()
+
+                        'WB lanewise sampling of leading vehicles as blocking or non-blocking which the follower vehicle also get assigned to
+
+                        ' The WB decisionBox and WB blockingBox are checked for presence of vehicle 
+                        If blockingBoxVehiclesWB.Count > 0 And decisionBoxVehiclesWB.Count > 0 Then
+                            Console.WriteLine("I1 WB")
+                            'If there is vehicle present in decisionBox and blockingBox then for each of the three lane "i" as 1, 2,3
+                            For i As Integer = 1 To 3
+                                'Console.Write(i)
+
+                                ' Initiating variables to store coordinate and index of the vehicle in the blockingbox that is closest
+                                ' to the intersection
+                                Dim foundblockingBoxMaxW1 = 0
+                                Dim maxblockingBoxCoordW1 As Double
+                                Dim maxblockingBoxIndexW1 As Integer
+
+                                'All vehicles in the blocking box are compared for their coordinates and the one closest to the 
+                                'decisionBox is identified and its coordinates and ID is stored. This identification of vehicles
+                                'in the blcoking box closest to the decisionBox is happening for every lane individually that is
+                                'Lane 1, Lane 2 and Lane 3
+                                For qW1 = 1 To blockingBoxVehiclesWB.Count
+                                    If (blockingBoxVehiclesWB(qW1).AttValue("Lane") = i) Then
+                                        'Console.WriteLine(blockingBoxVehiclesWB(q).AttValue("POINT").X)
+                                        If (foundblockingBoxMaxW1 = 0) Then
+                                            maxblockingBoxCoordW1 = blockingBoxVehiclesWB(qW1).AttValue("POINT").X
+                                            maxblockingBoxIndexW1 = qW1
+                                            foundblockingBoxMaxW1 = 1
+                                        ElseIf (blockingBoxVehiclesWB(qW1).AttValue("POINT").X > maxblockingBoxCoordW1) Then
+                                            maxblockingBoxCoordW1 = blockingBoxVehiclesWB(qW1).AttValue("POINT").X
+                                            maxblockingBoxIndexW1 = qW1
+                                        End If
+                                        ' Console.Write(" - ")
+                                        ' Console.Write(maxblockingBoxIndex)
+                                    End If
+                                Next
+
+                                'The vehicle identified in the blockingbox closest to the decisionbox is stored in maxblockingBoxIndex
+                                'If the speed of this identified vehicle is less thab 15 mph then it enters the following loop and the
+                                'the vehicles in the decisionBox are checked for lane change, lead vehicle is identified and is 
+                                'assigned as blocking or non-blocking vehicle 
+
+                                '## COLOR CODES AND VEHICLE TYPES ##
+                                'Blocking Vehicle Type     -> 1
+                                'Non-Blcoking Vehicle Type -> 2
+                                'Blocking Leader        ->  Purple  ->  RGB(255, 0, 255)
+                                'Non-Blocking leader    ->  Orange  ->  RGB(255, 165, 0)
+                                'Blocking follower      ->  Black   ->  RGB(0, 0, 0)       -> RGB(255 * vehtype1, 255 * vehtype1, 255 * vehtype1)
+                                'Non-Blocking follower  ->  White   ->  RGB(255, 255, 255) -> RGB(255 * vehtype2, 255 * vehtype2, 255 * vehtype2)
+
+                                If (foundblockingBoxMaxW1 = 1) Then
+                                    ' Console.Write(blockingBoxVehiclesWB(maxblockingBoxIndex).AttValue("Speed"))
+                                    If (blockingBoxVehiclesWB(maxblockingBoxIndexW1).AttValue("Speed") < 20 And blockingBoxVehiclesWB(maxblockingBoxIndexW1).AttValue("Acceleration") < 4) Then
+                                        'Console.WriteLine(blockingBoxVehiclesWB(maxblockingBoxIndex).AttValue("Speed"))
+                                        Dim foundMax1W1 = 0
+                                        Dim minCoord1W1 As Double
+                                        Dim minIndex1W1 As Integer
+
+                                        'all vehicles in the decisionbox that change lane while the value to block is 0 
+                                        'then they get assigned to orange color and remain non-blocking type
+                                        For bW1 = 1 To decisionBoxVehiclesWB.Count
+                                            If (decisionBoxVehiclesWB(bW1).AttValue("LANECHANGE") <> 0 And likelihood(value) = 0) Then
+                                                decisionBoxVehiclesWB(bW1).AttValue("Type") = 2
+                                                If (decisionBoxVehiclesWB(bW1).AttValue("Type") = 2) Then
+                                                    decisionBoxVehiclesWB(bW1).AttValue("color") = RGB(255, 165, 0)
+                                                End If
+                                            End If
+
+                                            'all vehicles in the decisionbox that change lane while the value to block greater than 0 
+                                            'then they get assigned to purple color and become blocking type as they show aggresive tendency
+                                            If (decisionBoxVehiclesWB(bW1).AttValue("LANECHANGE") <> 0 And likelihood(value) <> 0) Then
+                                                decisionBoxVehiclesWB(bW1).AttValue("Type") = 1
+                                                If (decisionBoxVehiclesWB(bW1).AttValue("Type") = 1) Then
+                                                    decisionBoxVehiclesWB(bW1).AttValue("color") = RGB(255, 0, 255)
+                                                End If
+                                            End If
+                                        Next
+
+                                        'All the vehicles in the decisioBox are compared to find ID and coordinate of vehicle leading
+                                        'in the decision box for each lane
+                                        For pW1 = 1 To decisionBoxVehiclesWB.Count
+                                            If (decisionBoxVehiclesWB(pW1).AttValue("Lane") = i) Then
+                                                'Console.Write(p)
+                                                'Console.Write(" - ")
+                                                'Console.WriteLine(decisionBoxVehiclesWB(p).AttValue("POINT").X)
+                                                Console.WriteLine(decisionBoxVehiclesWB(pW1).AttValue("ACCELERATION"))
+                                                If (foundMax1W1 = 0) Then
+                                                    minCoord1W1 = decisionBoxVehiclesWB(pW1).AttValue("POINT").X
+                                                    minIndex1W1 = pW1
+                                                    foundMax1W1 = 1
+                                                ElseIf (decisionBoxVehiclesWB(pW1).AttValue("POINT").X < minCoord1W1) Then
+                                                    minCoord1W1 = decisionBoxVehiclesWB(pW1).AttValue("POINT").X
+                                                    minIndex1W1 = pW1
+                                                End If
+                                            End If
+                                        Next
+
+                                        'if the vehicle identified as leading in the decision box is unassigned to blocking or non-blocking type
+                                        'then it is assigned to blocking purple or non-blocking orange depending on the likelihood value 
+                                        'assigned for the run if
+                                        If foundMax1W1 = 1 Then
+                                            If (decisionBoxVehiclesWB(minIndex1W1).AttValue("Type") = 30) Then
+                                                decisionBoxVehiclesWB(minIndex1W1).AttValue("Type") = flipcoin(likelihood(value)) + 1
+
+                                                If (decisionBoxVehiclesWB(minIndex1W1).AttValue("Type") = 1) Then
+                                                    decisionBoxVehiclesWB(minIndex1W1).AttValue("color") = RGB(255, 0, 255)
+                                                End If
+
+                                                If (decisionBoxVehiclesWB(minIndex1W1).AttValue("Type") = 2) Then
+                                                    decisionBoxVehiclesWB(minIndex1W1).AttValue("color") = RGB(255, 165, 0)
+                                                End If
+                                            End If
+
+                                            'all the follower vehicles in the decisionbox are assigned to the same type as the lead vehicle 
+                                            'and appear as white-non blocking or black-blocking
+                                            'For k = 1 To decisionBoxVehiclesWB.Count
+                                            '    If (decisionBoxVehiclesWB(k).AttValue("Lane") = i) Then
+                                            '        Dim vehicle = decisionBoxVehiclesWB(k)
+                                            '        If Not vehicle Is Nothing Then
+                                            '            If (k <> minIndex1) Then
+                                            '                If (decisionBoxVehiclesWB(k).AttValue("Type") = 30) And (decisionBoxVehiclesWB(minIndex1).AttValue("Type") = 1) Then
+                                            '                    decisionBoxVehiclesWB(k).AttValue("Type") = 1
+                                            '                    Dim vehtype1 As Integer = decisionBoxVehiclesWB(k).AttValue("Type") - 1
+                                            '                    decisionBoxVehiclesWB(k).AttValue("color") = RGB(255 * vehtype1, 255 * vehtype1, 255 * vehtype1)
+
+                                            '                ElseIf (decisionBoxVehiclesWB(k).AttValue("Type") = 30) And (decisionBoxVehiclesWB(minIndex1).AttValue("Type") = 2) Then
+                                            '                    decisionBoxVehiclesWB(k).AttValue("Type") = 2
+                                            '                    Dim vehtype2 As Integer = decisionBoxVehiclesWB(k).AttValue("Type") - 1
+                                            '                    decisionBoxVehiclesWB(k).AttValue("color") = RGB(255 * vehtype2, 255 * vehtype2, 255 * vehtype2)
+                                            '                End If
+                                            '            End If
+                                            '        End If
+                                            '    End If
+                                            'Next k
+                                        End If
+                                    End If
+                                End If
+                            Next
+                        End If
+
+
+                        ' EB lanewise sampling of leading vehicles as blocking or non-blocking which the follower vehicle become
+
+                        'The WB decisionBox and WB blockingBox are checked for presence of vehicle 
+                        If blockingBoxVehiclesEB.Count > 0 And decisionBoxVehiclesEB.Count > 0 Then
+                            Console.WriteLine("I1 EB")
+                            'If there is vehicle present in decisionBox and blockingBox then for each of the three lane "n" as 1, 2,3
+                            For n As Integer = 1 To 3
+
+                                ' Initiating variables to store coordinate and index of the vehicle in the blockingbox that is closest
+                                ' to the intersection
+                                Dim foundblockingBoxMinE1 = 0
+                                Dim minblockingBoxCoordE1 As Double
+                                Dim minblockingBoxIndexE1 As Integer
+
+                                'All vehicles in the blocking box are compared for their coordinates and the one closest to the 
+                                'decisionBox is identified and its coordinates and ID is stored. This identification of vehicles
+                                'in the blcoking box closest to the decisionBox is happening for every lane individually that is
+                                'Lane 1, Lane 2 and Lane 3
+                                For rE1 = 1 To blockingBoxVehiclesEB.Count
+                                    If (blockingBoxVehiclesEB(rE1).AttValue("Lane") = n) Then
+                                        'Console.Write(r)
+                                        'Console.Write(" - ")
+                                        'Console.WriteLine(blockingBoxVehiclesEB(r).AttValue("POINT").X)
+                                        If (foundblockingBoxMinE1 = 0) Then
+                                            minblockingBoxCoordE1 = blockingBoxVehiclesEB(rE1).AttValue("POINT").X
+                                            minblockingBoxIndexE1 = rE1
+                                            foundblockingBoxMinE1 = 1
+                                        ElseIf (blockingBoxVehiclesEB(rE1).AttValue("POINT").X < minblockingBoxCoordE1) Then
+                                            minblockingBoxCoordE1 = blockingBoxVehiclesEB(rE1).AttValue("POINT").X
+                                            minblockingBoxIndexE1 = rE1
+                                        End If
+                                    End If
+                                Next
+
+                                'The vehicle identified in the blockingbox closest to the decisionbox is stored in maxblockingBoxIndex
+                                'If the speed of this identified vehicle is less thab 15 km/h then it enters the following loop and the
+                                'the vehicles in the decisionBox are checked for lane change, lead vehicle is identified and is 
+                                'assigned as blocking or non-blocking vehicle 
+
+                                '## COLOR CODES AND VEHICLE TYPES ##
+                                'Blocking Vehicle Type     -> 1
+                                'Non-Blcoking Vehicle Type -> 2
+                                'Blocking Leader        ->  Purple  ->  RGB(255, 0, 255)
+                                'Non-Blocking leader    ->  Orange  ->  RGB(255, 165, 0)
+                                'Blocking follower      ->  Black   ->  RGB(0, 0, 0)       -> RGB(255 * vehtype1, 255 * vehtype1, 255 * vehtype1)
+                                'Non-Blocking follower  ->  White   ->  RGB(255, 255, 255) -> RGB(255 * vehtype2, 255 * vehtype2, 255 * vehtype2)
+
+
+                                If (foundblockingBoxMinE1 = 1) Then
+                                    If (blockingBoxVehiclesEB(minblockingBoxIndexE1).AttValue("Speed") < 20 And blockingBoxVehiclesEB(minblockingBoxIndexE1).AttValue("Acceleration") < 4) Then
+                                        Console.WriteLine(blockingBoxVehiclesEB(minblockingBoxIndexE1).AttValue("ACCELERATION"))
+                                        Dim foundMaxE1 = 0
+                                        Dim maxCoordE1 As Double
+                                        Dim maxIndexE1 As Integer
+
+                                        'all vehicles in the decisionbox that change lane while the value to block is 0 
+                                        'then they get assigned to orange color and remain non-blocking type
+                                        For tE1 = 1 To decisionBoxVehiclesEB.Count
+                                            If (decisionBoxVehiclesEB(tE1).AttValue("LANECHANGE") <> 0 And likelihood(value) = 0) Then
+                                                decisionBoxVehiclesEB(tE1).AttValue("Type") = 2
+                                                If (decisionBoxVehiclesEB(tE1).AttValue("Type") = 2) Then
+                                                    decisionBoxVehiclesEB(tE1).AttValue("color") = RGB(255, 165, 0)
+                                                End If
+                                            End If
+
+                                            'all vehicles in the decisionbox that change lane while the value to block greater than 0 
+                                            'then they get assigned to purple color and become blocking type as they show aggresive tendency
+                                            If (decisionBoxVehiclesEB(tE1).AttValue("LANECHANGE") <> 0 And likelihood(value) <> 0) Then
+                                                decisionBoxVehiclesEB(tE1).AttValue("Type") = 1
+                                                If (decisionBoxVehiclesEB(tE1).AttValue("Type") = 1) Then
+                                                    decisionBoxVehiclesEB(tE1).AttValue("color") = RGB(255, 0, 255)
+                                                End If
+                                            End If
+                                        Next
+
+                                        'All the vehicles in the decisioBox are compared to find ID and coordinate of vehicle leading
+                                        'in the decision box for each lane
+                                        For p = 1 To decisionBoxVehiclesEB.Count
+                                            If (decisionBoxVehiclesEB(p).AttValue("Lane") = n) Then
+                                                'Console.WriteLine(decisionBoxVehiclesEB(p).AttValue("POINT").X)
+                                                'Console.WriteLine(decisionBoxVehiclesEB(p).AttValue("ACCELERATION"))
+                                                If (foundMaxE1 = 0) Then
+                                                    maxCoordE1 = decisionBoxVehiclesEB(p).AttValue("POINT").X
+                                                    maxIndexE1 = p
+                                                    foundMaxE1 = 1
+                                                ElseIf (decisionBoxVehiclesEB(p).AttValue("POINT").X > maxCoordE1) Then
+                                                    maxCoordE1 = decisionBoxVehiclesEB(p).AttValue("POINT").X
+                                                    maxIndexE1 = p
+                                                End If
+                                            End If
+                                        Next
+
+                                        'if the vehicle identified as leading in the decision box is unassigned to blocking or non-blocking type
+                                        'then it is assigned to blocking purple or non-blocking orange depending on the likelihood value 
+                                        'assigned for the run if
+                                        If foundMaxE1 = 1 Then
+                                            If (decisionBoxVehiclesEB(maxIndexE1).AttValue("Type") = 40) Then
+                                                decisionBoxVehiclesEB(maxIndexE1).AttValue("Type") = flipcoin(likelihood(value)) + 1
+
+                                                If (decisionBoxVehiclesEB(maxIndexE1).AttValue("Type") = 1) Then
+                                                    decisionBoxVehiclesEB(maxIndexE1).AttValue("color") = RGB(255, 0, 255)
+                                                End If
+
+                                                If (decisionBoxVehiclesEB(maxIndexE1).AttValue("Type") = 2) Then
+                                                    decisionBoxVehiclesEB(maxIndexE1).AttValue("color") = RGB(255, 165, 0)
+                                                End If
+                                            End If
+
+                                            'all the follower vehicles in the decisionbox are assigned to the same type as the lead vehicle 
+                                            'and appear as white-non blocking or black-blocking
+                                            'For k = 1 To decisionBoxVehiclesEB.Count
+                                            '    If (decisionBoxVehiclesEB(k).AttValue("Lane") = n) Then
+                                            '        Dim vehicle = decisionBoxVehiclesEB(k)
+                                            '        If Not vehicle Is Nothing Then
+                                            '            If (k <> maxIndex) Then
+                                            '                If (decisionBoxVehiclesEB(k).AttValue("Type") = 40) And (decisionBoxVehiclesEB(maxIndex).AttValue("Type") = 1) Then
+                                            '                    decisionBoxVehiclesEB(k).AttValue("Type") = 1
+                                            '                    Dim vehtype1 As Integer = decisionBoxVehiclesEB(k).AttValue("Type") - 1
+                                            '                    decisionBoxVehiclesEB(k).AttValue("color") = RGB(255 * vehtype1, 255 * vehtype1, 255 * vehtype1)
+
+                                            '                ElseIf (decisionBoxVehiclesEB(k).AttValue("Type") = 40) And (decisionBoxVehiclesEB(maxIndex).AttValue("Type") = 2) Then
+                                            '                    decisionBoxVehiclesEB(k).AttValue("Type") = 2
+                                            '                    Dim vehtype2 As Integer = decisionBoxVehiclesEB(k).AttValue("Type") - 1
+                                            '                    decisionBoxVehiclesEB(k).AttValue("color") = RGB(255 * vehtype2, 255 * vehtype2, 255 * vehtype2)
+                                            '                End If
+                                            '            End If
+                                            '        End If
+                                            '    End If
+                                            'Next k
+                                        End If
+                                    End If
+                                    ' End If
+                                End If
+                            Next
+                        End If
+                    Next
+                    vissim.Exit()
+
+                    Thread.Sleep(5000)
+
+                    'Move output file - Raw Data Collection(.mer), Delay Raw (.vlr), Delay Compiled(.vlz) and Error files(.err)
+                    My.Computer.FileSystem.CopyFile("\\CEEfilesrv3\Hunter$\Data\DBTB\Abhilasha\Research\VISSIM Modelling\Summer 2018\Vissim Files\TRB 2018\Experiment2_unsat_delay_prevmodel2\Varying_sidestreet_vol_files\" + Arr(0) + ".mer", "\\CEEfilesrv3\Hunter$\Data\DBTB\Abhilasha\Research\VISSIM Modelling\Summer 2018\Vissim Files\TRB 2018\Experiment2_unsat_delay_prevmodel2\Varying_sidestreet_vol_files\Results\Seed" & randseed & "\Vol" + finArr(3) + "\dc\value" & likelihood(value) & ".mer", True)
+                    My.Computer.FileSystem.CopyFile("\\CEEfilesrv3\Hunter$\Data\DBTB\Abhilasha\Research\VISSIM Modelling\Summer 2018\Vissim Files\TRB 2018\Experiment2_unsat_delay_prevmodel2\Varying_sidestreet_vol_files\" + Arr(0) + ".vlr", "\\CEEfilesrv3\Hunter$\Data\DBTB\Abhilasha\Research\VISSIM Modelling\Summer 2018\Vissim Files\TRB 2018\Experiment2_unsat_delay_prevmodel2\Varying_sidestreet_vol_files\Results\Seed" & randseed & "\Vol" + finArr(3) + "\delay\raw\value" & likelihood(value) & ".vlr", True)
+                    My.Computer.FileSystem.CopyFile("\\CEEfilesrv3\Hunter$\Data\DBTB\Abhilasha\Research\VISSIM Modelling\Summer 2018\Vissim Files\TRB 2018\Experiment2_unsat_delay_prevmodel2\Varying_sidestreet_vol_files\" + Arr(0) + ".vlz", "\\CEEfilesrv3\Hunter$\Data\DBTB\Abhilasha\Research\VISSIM Modelling\Summer 2018\Vissim Files\TRB 2018\Experiment2_unsat_delay_prevmodel2\Varying_sidestreet_vol_files\Results\Seed" & randseed & "\Vol" + finArr(3) + "\delay\comp\value" & likelihood(value) & ".vlz", True)
+                    'My.Computer.FileSystem.CopyFile("C:\Users\asaroj3\Desktop\GRA\Spring 2016\Research\Vissim\Files\Varying_sidestreet_vol_files\" + Arr(0) + ".err", "C:\Users\asaroj3\Desktop\GRA\Spring 2016\Research\Vissim\Results\limDemand\multipleFiles\Seed" & randseed & "\Vol" + finArr(3) + "\error\value" & value & ".err", True)
+                Next
+            Next
+        Next
+    End Sub
+
+End Module
